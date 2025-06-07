@@ -1,0 +1,52 @@
+<!DOCTYPE html>
+<html lang="it">
+<head>
+  <meta charset="UTF-8">
+  <title>Scanner Biglietto</title>
+  <script src="https://unpkg.com/html5-qrcode"></script>
+  <style>
+    body { font-family: Arial, sans-serif; padding: 20px; background: #f5f5f5; text-align: center; }
+    #reader { width: 300px; margin: auto; }
+    .status { margin-top: 20px; font-size: 18px; font-weight: bold; }
+  </style>
+</head>
+<body>
+  <h1>🎫 Scanner Biglietto</h1>
+  <div id="reader"></div>
+  <div class="status" id="status">In attesa scansione...</div>
+
+  <script>
+    const validateQR = async (data) => {
+      try {
+        const res = await fetch("https://TUO_BACKEND.deno.dev/validate", {
+          method: "POST",
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify({ scannedData: data })
+        });
+        const result = await res.json();
+        document.getElementById("status").innerText = result.valid
+          ? "✅ Biglietto valido!"
+          : "❌ Biglietto NON valido!";
+      } catch (err) {
+        document.getElementById("status").innerText = "⚠️ Errore durante la validazione";
+      }
+    };
+
+    const qrCodeSuccessCallback = (decodedText) => {
+      try {
+        const parsed = JSON.parse(decodedText);
+        document.getElementById("status").innerText = "🔍 Validazione in corso...";
+        validateQR(decodedText);
+      } catch (e) {
+        document.getElementById("status").innerText = "❌ QR non valido (non JSON)";
+      }
+    };
+
+    new Html5Qrcode("reader").start(
+      { facingMode: "environment" },
+      { fps: 10, qrbox: 250 },
+      qrCodeSuccessCallback
+    );
+  </script>
+</body>
+</html>
