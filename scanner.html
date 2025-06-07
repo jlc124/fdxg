@@ -18,7 +18,7 @@
   <script>
     const validateQR = async (data) => {
       try {
-        const res = await fetch("https://TUO_BACKEND.deno.dev/validate", {
+        const res = await fetch("https://eventtix-backend.deno.dev", {
           method: "POST",
           headers: { "Content-Type": "application/json" },
           body: JSON.stringify({ scannedData: data })
