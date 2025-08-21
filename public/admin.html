@@ -1,0 +1,84 @@
+<!doctype html>
+<html lang="it">
+<head>
+    <meta charset="utf-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1">
+    <title>Regia - Admin</title>
+    <style>
+        body { font-family: system-ui, -apple-system, Segoe UI, Roboto, Helvetica, Arial, sans-serif; margin: 0; padding: 16px; background: #0b132b; color: #e0e6f8; }
+        h1 { margin-top: 0; }
+        .grid { display: grid; grid-template-columns: 320px 1fr; gap: 16px; align-items: start; }
+        .card { background: #1c2541; border-radius: 12px; padding: 12px; box-shadow: 0 6px 24px rgba(0,0,0,0.3); }
+        .list { max-height: 70vh; overflow: auto; }
+        .item { display: flex; justify-content: space-between; align-items: center; padding: 8px; border-bottom: 1px solid #3a506b; }
+        .item:last-child { border-bottom: 0; }
+        button { background: #5bc0be; color: #001219; border: 0; padding: 6px 10px; border-radius: 8px; cursor: pointer; font-weight: 700; }
+        .previewGrid { display: grid; grid-template-columns: repeat(auto-fill, minmax(220px, 1fr)); gap: 12px; }
+        .previewCard { background: #1c2541; border-radius: 12px; padding: 8px; }
+        img { width: 100%; border-radius: 8px; display: block; background: #000; }
+        .muted { opacity:.8; font-size:12px; }
+    </style>
+</head>
+<body>
+    <h1>Regia</h1>
+    <div class="grid">
+        <div class="card">
+            <h3>Iscritti</h3>
+            <div id="list" class="list"></div>
+        </div>
+        <div>
+            <div class="card" style="margin-bottom:12px;">
+                <h3>Anteprime</h3>
+                <div id="previews" class="previewGrid"></div>
+                <p class="muted">Clicca "Cattura" su un utente per inviare la foto allo schermo.</p>
+            </div>
+            <div class="card">
+                <h3>Controlli Schermo</h3>
+                <p class="muted">Apri la pagina schermo su un display: <a href="/screen.html">/screen.html</a></p>
+            </div>
+        </div>
+    </div>
+
+    <script src="/socket.io/socket.io.js"></script>
+    <script>
+        const socket = io();
+        const list = document.getElementById('list');
+        const previews = document.getElementById('previews');
+
+        function renderList(items){
+            list.innerHTML = '';
+            items.forEach(i => {
+                const row = document.createElement('div');
+                row.className = 'item';
+                row.innerHTML = `<div><strong>${i.code}</strong> — ${i.name} ${i.surname} (${i.birthYear})</div>`;
+                const btn = document.createElement('button');
+                btn.textContent = 'Cattura';
+                btn.onclick = () => socket.emit('admin:captureRequest', { code: i.code });
+                row.appendChild(btn);
+                list.appendChild(row);
+            });
+        }
+
+        function upsertPreview(code, imageData){
+            let card = document.querySelector(`[data-code="${code}"]`);
+            if (!card){
+                card = document.createElement('div');
+                card.className = 'previewCard';
+                card.dataset.code = code;
+                card.innerHTML = `<div style="display:flex; justify-content:space-between; align-items:center; margin-bottom:6px;"><div><strong>${code}</strong></div><button data-cap> Cattura </button></div><img data-img alt="preview">`;
+                card.querySelector('[data-cap]').onclick = () => socket.emit('admin:captureRequest', { code });
+                previews.appendChild(card);
+            }
+            const img = card.querySelector('[data-img]');
+            img.src = imageData;
+        }
+
+        socket.on('admin:updateList', renderList);
+        socket.on('admin:preview', ({ code, imageData }) => upsertPreview(code, imageData));
+
+        // Request initial list by emitting a no-op join
+        socket.emit('admin:hello');
+    </script>
+</body>
+</html>
+
