@@ -1,0 +1,188 @@
+<!doctype html>
+<html lang="it">
+<head>
+    <meta charset="utf-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1">
+    <title>Registrazione Tifoso</title>
+    <style>
+        body { font-family: system-ui, -apple-system, Segoe UI, Roboto, Helvetica, Arial, sans-serif; margin: 0; padding: 16px; background: #0b132b; color: #e0e6f8; }
+        h1 { margin-top: 0; }
+        .card { background: #1c2541; border-radius: 12px; padding: 16px; box-shadow: 0 6px 24px rgba(0,0,0,0.3); max-width: 720px; margin: 0 auto; }
+        label { display: block; margin: 8px 0 4px; }
+        input { width: 100%; padding: 10px; border-radius: 8px; border: 1px solid #3a506b; background:#0b132b; color:#e0e6f8; }
+        button { background: #5bc0be; color: #001219; border: 0; padding: 10px 14px; border-radius: 8px; cursor: pointer; font-weight: 700; }
+        button:disabled { opacity: .6; cursor: not-allowed; }
+        .row { display: grid; grid-template-columns: 1fr 1fr; gap: 12px; }
+        video, canvas { width: 100%; border-radius: 12px; background: #000; }
+        .preview { margin-top: 12px; }
+        .small { opacity: .8; font-size: 12px; }
+    </style>
+</head>
+<body>
+    <div class="card">
+        <h1>Registrazione Tifoso</h1>
+        <p class="small">Inserisci o scansiona il codice ricevuto allo stadio.</p>
+        <div>
+            <label>Codice</label>
+            <input id="code" placeholder="Es. A1B2C3" autocomplete="one-time-code">
+        </div>
+        <div class="row">
+            <div>
+                <label>Nome</label>
+                <input id="name" placeholder="Mario">
+            </div>
+            <div>
+                <label>Cognome</label>
+                <input id="surname" placeholder="Rossi">
+            </div>
+        </div>
+        <div>
+            <label>Anno di nascita</label>
+            <input id="birthYear" type="number" min="1900" max="2100" placeholder="1990">
+        </div>
+        <div style="margin:12px 0; display:flex; gap:8px;">
+            <button id="join">Entra</button>
+            <button id="scan">Scansiona QR</button>
+        </div>
+
+        <div class="preview">
+            <video id="video" autoplay playsinline muted></video>
+            <canvas id="canvas" style="display:none"></canvas>
+        </div>
+        <div style="margin-top:8px; display:flex; gap:8px;">
+            <button id="sendStill" disabled>Invia Foto</button>
+        </div>
+        <p class="small" id="status"></p>
+    </div>
+
+    <script src="/socket.io/socket.io.js"></script>
+    <script src="https://cdn.jsdelivr.net/npm/jsqr@1.4.0/dist/jsQR.js"></script>
+    <script>
+        const socket = io();
+        const el = (id) => document.getElementById(id);
+
+        const video = el('video');
+        const canvas = el('canvas');
+        const ctx = canvas.getContext('2d');
+        let joinedCode = null;
+        let previewInterval = null;
+        let currentStream = null;
+        let scanning = false;
+
+        async function startCamera(facing = 'user') {
+            try {
+                if (currentStream) stopStream(currentStream);
+                const stream = await navigator.mediaDevices.getUserMedia({ video: { facingMode: facing }, audio: false });
+                currentStream = stream;
+                video.srcObject = stream;
+                await video.play();
+                if (facing === 'user') {
+                    el('sendStill').disabled = false;
+                    startPreviewLoop();
+                    setStatus('Anteprima attiva.');
+                }
+            } catch (e) {
+                setStatus('Errore accesso fotocamera: ' + e.message);
+            }
+        }
+
+        function stopStream(stream){
+            stream.getTracks().forEach(t => t.stop());
+        }
+
+        function setStatus(msg) { el('status').textContent = msg; }
+
+        function startPreviewLoop() {
+            stopPreviewLoop();
+            previewInterval = setInterval(() => {
+                if (!joinedCode) return;
+                captureToCanvas();
+                const imageData = canvas.toDataURL('image/jpeg', 0.5);
+                socket.emit('register:preview', { imageData });
+            }, 800);
+        }
+
+        function stopPreviewLoop() {
+            if (previewInterval) clearInterval(previewInterval);
+            previewInterval = null;
+        }
+
+        function captureToCanvas() {
+            const w = video.videoWidth;
+            const h = video.videoHeight;
+            if (!w || !h) return;
+            canvas.width = w;
+            canvas.height = h;
+            ctx.drawImage(video, 0, 0, w, h);
+        }
+
+        el('join').addEventListener('click', () => {
+            const code = el('code').value.trim();
+            const name = el('name').value.trim();
+            const surname = el('surname').value.trim();
+            const birthYear = parseInt(el('birthYear').value, 10);
+            if (!code || !name || !surname || !birthYear) {
+                setStatus('Compila tutti i campi.');
+                return;
+            }
+            joinedCode = code;
+            socket.emit('register:join', { code, name, surname, birthYear });
+            startCamera();
+            setStatus('Registrato con codice ' + code + '.');
+        });
+
+        el('sendStill').addEventListener('click', () => {
+            if (!joinedCode) return;
+            captureToCanvas();
+            const imageData = canvas.toDataURL('image/jpeg', 0.9);
+            socket.emit('register:captureResult', { code: joinedCode, imageData });
+            setStatus('Foto inviata.');
+        });
+
+        // Optional: QR scanning via native apps that deep-link or manual input; placeholder here
+        el('scan').addEventListener('click', async () => {
+            if (scanning) return;
+            scanning = true;
+            setStatus('Scanner QR attivo...');
+            await startCamera('environment');
+            const startedAt = Date.now();
+
+            async function scanLoop(){
+                if (!scanning) return;
+                captureToCanvas();
+                const w = canvas.width, h = canvas.height;
+                if (w && h) {
+                    const img = ctx.getImageData(0, 0, w, h);
+                    const result = jsQR(img.data, w, h, { inversionAttempts: 'attemptBoth' });
+                    if (result && result.data) {
+                        el('code').value = result.data.trim();
+                        setStatus('Codice rilevato: ' + result.data + '. Premi Entra.');
+                        scanning = false;
+                        if (currentStream) stopStream(currentStream);
+                        video.srcObject = null;
+                        return;
+                    }
+                }
+                if (Date.now() - startedAt > 20000) { // timeout 20s
+                    setStatus('QR non trovato. Riprova o inserisci manualmente.');
+                    scanning = false;
+                    if (currentStream) stopStream(currentStream);
+                    video.srcObject = null;
+                    return;
+                }
+                requestAnimationFrame(scanLoop);
+            }
+            requestAnimationFrame(scanLoop);
+        });
+
+        socket.on('register:captureNow', () => {
+            if (!joinedCode) return;
+            captureToCanvas();
+            const imageData = canvas.toDataURL('image/jpeg', 0.9);
+            socket.emit('register:captureResult', { code: joinedCode, imageData });
+            setStatus('Richiesta ricevuta: foto inviata alla regia.');
+        });
+    </script>
+</body>
+</html>
+
